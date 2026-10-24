@@ -22,3 +22,6 @@ launcher/replay_pid*.log
 
 # GitHub Actions (butuh scope workflow di token)
 .github/workflows/
+
+pixeltv/build/
+pixeltv/.gradle/
