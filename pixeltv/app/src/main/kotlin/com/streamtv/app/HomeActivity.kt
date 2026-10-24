@@ -129,14 +129,14 @@ class HomeActivity : Activity() {
         })
 
         root.addView(TextView(this).apply {
-            text = "💡 Tips: Gunakan tombol Menu di remote untuk akses cepat ke bookmark dan ganti situs"
+            text = "💡 Tips: tombol Menu atau tahan OK untuk menu cepat. Tombol merah = Putar, hijau = Ganti Server, biru = Pilih Situs."
             textSize = 12f
             setTextColor(Color.parseColor("#666666"))
             setPadding(0, 0, 0, (8 * density).toInt())
         })
 
         root.addView(TextView(this).apply {
-            text = "v2.2.0 • Build by Buildbox Studio"
+            text = "v2.3.0 • Build by Buildbox Studio"
             textSize = 11f
             setTextColor(Color.parseColor("#444444"))
             setPadding(0, (16 * density).toInt(), 0, 0)

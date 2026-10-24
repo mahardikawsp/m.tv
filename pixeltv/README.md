@@ -2,7 +2,7 @@
 
 PIXELTV - Android TV & Mobile streaming app with built-in ad blocker, multi-site support, bookmark, history, and D-pad navigation. Features draggable floating menu, modern glassmorphism UI, and fullscreen video handler. Built with Kotlin + WebView.
 
-**Version:** 2.2.0  
+**Version:** 2.3.0  
 **Build by:** [Buildbox Studio](https://www.tiktok.com/@buildbox.studio)
 
 <img width="1158" height="540" alt="image" src="https://github.com/user-attachments/assets/682addf6-7e01-4770-9f57-6f31cc47c4f3" />
@@ -29,6 +29,12 @@ PIXELTV - Android TV & Mobile streaming app with built-in ad blocker, multi-site
 - ✅ **Snackbar Notifications** — error messages with retry button
 - ✅ Fullscreen WebView with ad blocker
 - ✅ Compatible with Android TV (D-pad native focus navigation)
+- ✅ **Row/column D-pad navigation** — predictable focus, never jumpy
+- ✅ **Quick menu** — press Menu or hold OK (play, next server, back, forward, search)
+- ✅ **Fullscreen player controls** — OK play/pause, D-pad seek, progress overlay
+- ✅ **One-press Putar** — finds the video, play button or player iframe
+- ✅ **Ganti Server** — cycles the server/season tabs on the page
+- ✅ **Cursor mode** — D-pad moves a pointer for stubborn pages and iframes
 - ✅ Compatible with Phone/Tablet (touch + gestures)
 - ✅ Fullscreen video handler
 - ✅ Custom User-Agent (desktop browser)
@@ -48,14 +54,18 @@ PIXELTV - Android TV & Mobile streaming app with built-in ad blocker, multi-site
 
 | Button | Function |
 |--------|----------|
-| D-pad | Move focus between elements |
+| D-pad | Move focus between elements (row/column) |
 | OK / Center | Click focused element |
-| Back | Go back / Confirm exit |
-| Menu | Open overlay menu |
-| Info/Guide | Quick bookmark |
+| Long-press OK | Open quick menu |
+| Back | Go back / exit cursor mode / exit fullscreen |
+| Menu | Open quick menu |
+| Left / Right (fullscreen) | Seek -10s / +10s |
+| Up / Down (fullscreen) | Seek -60s / +60s |
+| Red / Green / Blue / Yellow | Putar / Ganti Server / Pilih Situs / Cari (if the remote has colored keys) |
 | CH+ / CH- | Switch streaming site |
-| Play/Pause | Play/pause video |
+| Play/Pause | Play movie / toggle video |
 | Search | Open search dialog |
+| Info/Guide | Quick bookmark |
 
 ### Phone/Tablet Gestures
 
@@ -88,6 +98,12 @@ PIXELTV - Android TV & Mobile streaming app with built-in ad blocker, multi-site
 - ✅ **Snackbar Notifications** — pesan error dengan tombol retry
 - ✅ WebView fullscreen dengan ad blocker
 - ✅ Kompatibel Android TV (navigasi D-pad native)
+- ✅ **Navigasi D-pad baris/kolom** — fokus stabil, nggak lompat-lompat
+- ✅ **Menu cepat** — tombol Menu atau tahan OK (putar, server, back, forward, cari)
+- ✅ **Kontrol player fullscreen** — OK play/pause, D-pad seek, progress overlay
+- ✅ **Sekali tekan Putar** — cari video, tombol play, atau iframe player
+- ✅ **Ganti Server** — pindah tab server/season di halaman
+- ✅ **Mode kursor** — D-pad gerak pointer untuk halaman/iframe yang bandel
 - ✅ Kompatibel HP/Tablet (touch + gesture)
 - ✅ Fullscreen video handler
 - ✅ Custom User-Agent (desktop browser)
@@ -107,14 +123,18 @@ PIXELTV - Android TV & Mobile streaming app with built-in ad blocker, multi-site
 
 | Tombol | Fungsi |
 |--------|--------|
-| D-pad | Pindah focus antar elemen |
+| D-pad | Pindah focus antar elemen (baris/kolom) |
 | OK / Center | Klik elemen yang di-focus |
-| Back | Kembali / Confirm keluar |
-| Menu | Buka overlay menu |
-| Info/Guide | Quick bookmark |
+| Tahan OK | Buka menu cepat |
+| Back | Kembali / keluar mode kursor / keluar fullscreen |
+| Menu | Buka menu cepat |
+| Kiri / Kanan (fullscreen) | Seek -10s / +10s |
+| Atas / Bawah (fullscreen) | Seek -60s / +60s |
+| Merah / Hijau / Biru / Kuning | Putar / Ganti Server / Pilih Situs / Cari (kalau remote punya tombol warna) |
 | CH+ / CH- | Ganti situs streaming |
-| Play/Pause | Play/pause video |
+| Play/Pause | Putar film / toggle video |
 | Search | Buka dialog pencarian |
+| Info/Guide | Quick bookmark |
 
 ### Gesture HP/Tablet
 
@@ -133,7 +153,7 @@ PIXELTV - Android TV & Mobile streaming app with built-in ad blocker, multi-site
 
 | # | Site | URL |
 |---|------|-----|
-| 1 | iDlix | z1.idlixku.com |
+| 1 | iDlix | z2.idlixku.com |
 | 2 | LK21 | tv10.lk21official.cc |
 | 3 | Rebahin | rebahinxxi3.beauty |
 | 4 | Nobargasi | www.nobargasi.my.id |
@@ -150,13 +170,15 @@ StreamTV/
 │   ├── kotlin/com/streamtv/app/
 │   │   ├── SplashActivity.kt         # Splash screen
 │   │   ├── HomeActivity.kt           # Home / site picker
-│   │   ├── MainActivity.kt           # WebView player
+│   │   ├── MainActivity.kt           # WebView player + remote handling
 │   │   ├── data/
 │   │   │   ├── BookmarkManager.kt    # Bookmark CRUD
 │   │   │   ├── HistoryManager.kt     # History tracking
 │   │   │   └── SiteManager.kt        # Multi-site config
 │   │   └── ui/
 │   │       └── OverlayMenu.kt        # Modern overlay menu
+│   ├── assets/
+│   │   └── tv_nav.js                 # D-pad navigation + player bridge
 │   ├── res/
 │   │   ├── drawable/                  # Icons & banner
 │   │   ├── mipmap-*/                  # App icon (PIXELTV)
@@ -170,6 +192,17 @@ StreamTV/
 ---
 
 ## Changelog
+
+### v2.3.0
+- NEW: **Navigasi D-pad ditulis ulang** — pindah fokus baris/kolom, highlight tetap di posisi benar saat scroll, auto-scroll, dan label elemen
+- NEW: **Kontrol player fullscreen** — OK play/pause, ◀▶ seek ±10s, ▲▼ seek ±60s, overlay progress/waktu, feedback seek
+- NEW: **Menu cepat** — tombol Menu atau tahan OK: Putar, Ganti Server, Back, Forward, Cari, Mode Kursor, Reload
+- NEW: **Mode kursor** — D-pad menggerakkan pointer dan OK melakukan tap native, untuk halaman/iframe yang tidak bisa di-fokus
+- NEW: **Aksi sekali tekan** — Putar mencari video/tombol play/iframe player; Ganti Server memindah tab server
+- NEW: Alias tombol remote: CH+/-, tombol warna (merah/hijau/biru/kuning), Media Play/Pause, Search, Info/Guide, Menu/Settings
+- FIX: Klik ganda — tombol play/modal dulu terbuka lalu langsung tertutup karena dua event klik
+- FIX: URL pencarian kini di-encode dengan benar dan situs aktif dideteksi dari URL
+- FIX: Tabrakan tombol Back dengan fullscreen dan dialog keluar
 
 ### v2.2.0
 - NEW: **Red / Black / Grey theme** — complete UI redesign across all screens (splash, home, menu, player)

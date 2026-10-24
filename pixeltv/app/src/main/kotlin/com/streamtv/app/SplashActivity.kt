@@ -92,7 +92,7 @@ class SplashActivity : Activity() {
 
         // Version at bottom
         val version = TextView(this).apply {
-            text = "v2.2.0 • Build by Buildbox Studio"
+            text = "v2.3.0 • Build by Buildbox Studio"
             textSize = 11f
             setTextColor(Color.parseColor("#44FFFFFF"))
             gravity = Gravity.CENTER

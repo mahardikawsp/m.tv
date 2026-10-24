@@ -20,18 +20,30 @@ import com.streamtv.app.data.HistoryManager
 import com.streamtv.app.data.SiteManager
 
 /**
- * Modern overlay menu with glassmorphism-style design
+ * Native overlay menu, built for D-pad navigation.
+ *
+ * Every row is focusable, so the remote can reach quick actions without a
+ * mouse: play, next server, back/forward, search, cursor mode and the
+ * bookmark/history lists.
  */
 class OverlayMenu(
     private val context: Context,
     private val bookmarkManager: BookmarkManager,
     private val historyManager: HistoryManager,
     private val onNavigate: (String) -> Unit,
-    private val onBookmarkCurrent: () -> Unit
+    private val onBookmarkCurrent: () -> Unit,
+    private val isCursorMode: () -> Boolean = { false },
+    private val onPlay: () -> Unit = {},
+    private val onNextServer: () -> Unit = {},
+    private val onGoBack: () -> Unit = {},
+    private val onGoForward: () -> Unit = {},
+    private val onSearch: () -> Unit = {},
+    private val onToggleCursor: () -> Unit = {},
+    private val onRefresh: () -> Unit = {}
 ) {
 
     companion object {
-        const val APP_VERSION = "2.2.0"
+        const val APP_VERSION = "2.3.0"
         const val CREDIT_URL = "https://www.tiktok.com/@buildbox.studio"
     }
 
@@ -53,6 +65,21 @@ class OverlayMenu(
             shape = GradientDrawable.RECTANGLE
             cornerRadius = 16f
             setColor(Color.parseColor("#1F1F1F"))
+        }
+    }
+
+    private fun createSectionLabel(text: String, density: Float): TextView {
+        return TextView(context).apply {
+            this.text = text
+            textSize = 10f
+            setTextColor(Color.parseColor("#888888"))
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            letterSpacing = 0.12f
+            setPadding((4 * density).toInt(), (8 * density).toInt(), 0, (6 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
         }
     }
 
@@ -109,16 +136,45 @@ class OverlayMenu(
 
             // Focus highlight for TV remote
             isFocusable = true
+            isFocusableInTouchMode = true
+            isClickable = true
             setOnFocusChangeListener { v, hasFocus ->
                 val bg = v.background as? GradientDrawable
                 if (hasFocus) {
                     bg?.setColor(Color.parseColor("#2A1416"))
                     bg?.setStroke((2 * density).toInt(), Color.parseColor("#E50914"))
+                    v.scaleX = 1.02f
+                    v.scaleY = 1.02f
                 } else {
                     bg?.setColor(Color.parseColor("#1F1F1F"))
                     bg?.setStroke(0, Color.TRANSPARENT)
+                    v.scaleX = 1f
+                    v.scaleY = 1f
                 }
             }
+        }
+    }
+
+    /**
+     * Focus the first reachable view so the D-pad works as soon as the dialog
+     * appears (a Dialog does not focus anything by itself).
+     */
+    private fun focusFirst(view: View): Boolean {
+        if (view.visibility != View.VISIBLE) return false
+        if (view.isFocusable) {
+            if (view.requestFocus()) return true
+        }
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                if (focusFirst(view.getChildAt(i))) return true
+            }
+        }
+        return false
+    }
+
+    private fun focusWhenShown(dialog: Dialog, root: View) {
+        dialog.setOnShowListener {
+            root.post { focusFirst(root) }
         }
     }
 
@@ -136,7 +192,7 @@ class OverlayMenu(
         }
 
         val density = context.resources.displayMetrics.density
-        val maxWidth = (340 * density).toInt()
+        val maxWidth = (360 * density).toInt()
         val maxHeight = (context.resources.displayMetrics.heightPixels * 0.85).toInt()
 
         // ScrollView as root so entire menu is scrollable
@@ -177,35 +233,82 @@ class OverlayMenu(
 
         // Subtitle
         rootLayout.addView(TextView(context).apply {
-            text = "Streaming Menu"
+            text = "Remote Menu"
             textSize = 12f
             setTextColor(Color.parseColor("#B3B3B3"))
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, (20 * density).toInt())
+            setPadding(0, 0, 0, (16 * density).toInt())
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
         })
 
-        // Divider
+        rootLayout.addView(createSectionLabel("PEMUTARAN", density))
+
+        rootLayout.addView(createMenuItem("▶", "Putar / Lanjutkan") {
+            dialog.dismiss()
+            onPlay()
+        })
+        rootLayout.addView(createMenuItem("🔄", "Ganti Server") {
+            dialog.dismiss()
+            onNextServer()
+        })
+
+        rootLayout.addView(createSectionLabel("NAVIGASI", density))
+
+        rootLayout.addView(createMenuItem("⬅️", "Kembali") {
+            dialog.dismiss()
+            onGoBack()
+        })
+        rootLayout.addView(createMenuItem("➡️", "Maju") {
+            dialog.dismiss()
+            onGoForward()
+        })
+        rootLayout.addView(createMenuItem("🔍", "Cari Film") {
+            dialog.dismiss()
+            onSearch()
+        })
+        rootLayout.addView(createMenuItem(
+            "🎯",
+            if (isCursorMode()) "Mode Kursor: AKTIF" else "Mode Kursor: MATI"
+        ) {
+            dialog.dismiss()
+            onToggleCursor()
+        })
+        rootLayout.addView(createMenuItem("🔄", "Muat Ulang") {
+            dialog.dismiss()
+            onRefresh()
+        })
+
         rootLayout.addView(createDivider(density))
 
-        // Menu items
-        val menuItems = listOf(
-            Triple("🏠", "Beranda") { dialog.dismiss(); onNavigate(SiteManager.sites[0].url) },
-            Triple("🌐", "Pilih Situs") { dialog.dismiss(); showSiteSelector() },
-            Triple("⭐", "Bookmark") { dialog.dismiss(); showBookmarks() },
-            Triple("📋", "Riwayat") { dialog.dismiss(); showHistory() },
-            Triple("➕", "Bookmark Halaman Ini") { dialog.dismiss(); onBookmarkCurrent() },
-            Triple("🗑️", "Hapus Riwayat") { dialog.dismiss(); confirmClearHistory() }
-        )
+        // Existing actions
+        rootLayout.addView(createMenuItem("🏠", "Beranda") {
+            dialog.dismiss()
+            onNavigate(SiteManager.sites[0].url)
+        })
+        rootLayout.addView(createMenuItem("🌐", "Pilih Situs") {
+            dialog.dismiss()
+            showSiteSelector()
+        })
+        rootLayout.addView(createMenuItem("⭐", "Bookmark") {
+            dialog.dismiss()
+            showBookmarks()
+        })
+        rootLayout.addView(createMenuItem("📋", "Riwayat") {
+            dialog.dismiss()
+            showHistory()
+        })
+        rootLayout.addView(createMenuItem("➕", "Bookmark Halaman Ini") {
+            dialog.dismiss()
+            onBookmarkCurrent()
+        })
+        rootLayout.addView(createMenuItem("🗑️", "Hapus Riwayat") {
+            dialog.dismiss()
+            confirmClearHistory()
+        })
 
-        menuItems.forEach { (icon, label, action) ->
-            rootLayout.addView(createMenuItem(icon, label, action))
-        }
-
-        // Divider
         rootLayout.addView(createDivider(density))
 
         // Credit
@@ -242,7 +345,8 @@ class OverlayMenu(
         scrollView.addView(rootLayout)
 
         dialog.setContentView(scrollView)
-        dialog.window?.setLayout(maxWidth, maxHeight.coerceAtMost(ViewGroup.LayoutParams.WRAP_CONTENT))
+        dialog.window?.setLayout(maxWidth, maxHeight)
+        focusWhenShown(dialog, rootLayout)
         dialog.show()
 
         // Animate in
@@ -298,6 +402,7 @@ class OverlayMenu(
         }
 
         dialog.setContentView(rootLayout)
+        focusWhenShown(dialog, rootLayout)
         dialog.show()
 
         rootLayout.alpha = 0f
@@ -374,6 +479,7 @@ class OverlayMenu(
         })
 
         dialog.setContentView(rootLayout)
+        focusWhenShown(dialog, rootLayout)
         dialog.show()
 
         rootLayout.alpha = 0f
@@ -448,6 +554,7 @@ class OverlayMenu(
         })
 
         dialog.setContentView(rootLayout)
+        focusWhenShown(dialog, rootLayout)
         dialog.show()
 
         rootLayout.alpha = 0f
@@ -513,8 +620,16 @@ class OverlayMenu(
             )
         }
 
+        fun styleFocus(button: TextView, hasFocus: Boolean, fill: String) {
+            val bg = button.background as? GradientDrawable
+            bg?.setColor(Color.parseColor(if (hasFocus) "#E50914" else fill))
+            bg?.setStroke(if (hasFocus) (2 * density).toInt() else 0, Color.WHITE)
+            button.scaleX = if (hasFocus) 1.04f else 1f
+            button.scaleY = if (hasFocus) 1.04f else 1f
+        }
+
         // Cancel button
-        buttonRow.addView(TextView(context).apply {
+        val cancelButton = TextView(context).apply {
             text = "Batal"
             textSize = 14f
             setTextColor(Color.WHITE)
@@ -534,10 +649,14 @@ class OverlayMenu(
             }
             setOnClickListener { dialog.dismiss() }
             isFocusable = true
-        })
+            isFocusableInTouchMode = true
+            setOnFocusChangeListener { v, hasFocus ->
+                styleFocus(v as TextView, hasFocus, "#333333")
+            }
+        }
 
         // Delete button
-        buttonRow.addView(TextView(context).apply {
+        val deleteButton = TextView(context).apply {
             text = "Hapus"
             textSize = 14f
             setTextColor(Color.WHITE)
@@ -561,11 +680,20 @@ class OverlayMenu(
                 Toast.makeText(context, "Riwayat dihapus", Toast.LENGTH_SHORT).show()
             }
             isFocusable = true
-        })
+            isFocusableInTouchMode = true
+            setOnFocusChangeListener { v, hasFocus ->
+                styleFocus(v as TextView, hasFocus, "#E50914")
+            }
+        }
 
+        buttonRow.addView(cancelButton)
+        buttonRow.addView(deleteButton)
         rootLayout.addView(buttonRow)
 
         dialog.setContentView(rootLayout)
+        dialog.setOnShowListener {
+            cancelButton.post { cancelButton.requestFocus() }
+        }
         dialog.show()
     }
 
