@@ -4,19 +4,22 @@ import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Build;
+import android.os.PowerManager;
 import android.util.Log;
+import android.widget.Toast;
 
 import java.util.Calendar;
 import java.util.Locale;
 
 public class PrayerManager {
     private static final String TAG = "PrayerManager";
+    private static final String PREFS_NAME = "weather_location_prefs";
 
-    // Koordinat tetap: Kelurahan Medokan Ayu, Kecamatan Rungkut, Kota Surabaya 60295.
-    // Satu sumber dengan WeatherManager, supaya cuaca dan jadwal shalat tidak pernah berbeda.
+    // Koordinat lokasi dinamis, default dari WeatherManager
     public static double latitude = WeatherManager.LAT;
     public static double longitude = WeatherManager.LON;
     public static String cityName = WeatherManager.CITY;
@@ -34,8 +37,8 @@ public class PrayerManager {
         public String locationName;
     }
 
-    private static String lastAdzanTriggered = "";
     private static MediaPlayer mediaPlayer;
+    private static PowerManager.WakeLock wakeLock;
 
     public static void updateLocation(double lat, double lon, String city) {
         latitude = lat;
@@ -156,7 +159,7 @@ public class PrayerManager {
                 "Subuh %s  •  Dzuhur %s  •  Ashar %s  •  Maghrib %s  •  Isya %s",
                 info.subuh, info.dzuhur, info.ashar, info.maghrib, info.isya);
 
-        // Periksa apakah waktu adzan telah tiba
+        // Periksa apakah waktu adzan telah tiba (sinkronisasi dari minuteTick)
         if (context != null) {
             checkAndPlayAdzan(context, cal, currentMinutes, mSubuh, mDzuhur, mAshar, mMaghrib, mIsya);
         }
@@ -173,12 +176,151 @@ public class PrayerManager {
         else if (Math.abs(current - mIsya) <= 1) prayerNow = "Isya";
 
         if (prayerNow != null) {
-            int dayOfYear = cal.get(Calendar.DAY_OF_YEAR);
-            String triggerKey = dayOfYear + "_" + prayerNow;
-            if (!triggerKey.equals(lastAdzanTriggered)) {
-                lastAdzanTriggered = triggerKey;
-                playAdzan(context);
+            playAdzanIfValid(context, prayerNow);
+        }
+    }
+
+    /**
+     * Memvalidasi apakah adzan benar-benar boleh diputar:
+     * 1. Belum pernah diputar untuk waktu shalat ini pada hari ini (disimpan di SharedPreferences)
+     * 2. Waktu saat ini harus sesuai (+- 2 menit) dengan jadwal shalat tersebut
+     * 3. Jika valid, putar audio Arab yang sesuai (Subuh memakai adzan_subuh.mp3, lainnya memakai adzan.mp3)
+     */
+    public static synchronized boolean playAdzanIfValid(Context context, String prayerName) {
+        if (context == null || prayerName == null) return false;
+
+        Calendar now = Calendar.getInstance();
+        int currentMinutes = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE);
+
+        // 1. Cek riwayat putar hari ini
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        String todayKey = "adzan_played_" + now.get(Calendar.YEAR) + "_" + now.get(Calendar.DAY_OF_YEAR) + "_" + prayerName;
+        if (prefs.getBoolean(todayKey, false)) {
+            Log.d(TAG, "Adzan " + prayerName + " sudah pernah diputar hari ini. Abaikan.");
+            return false;
+        }
+
+        // 2. Hitung jadwal shalat dan cek toleransi waktu (+- 2 menit)
+        PrayerInfo info = calculate(null, now);
+        int scheduledMinutes = getPrayerMinutes(info, prayerName);
+
+        if (scheduledMinutes < 0 || Math.abs(currentMinutes - scheduledMinutes) > 2) {
+            Log.w(TAG, "Alarm adzan " + prayerName + " dibatalkan karena waktu tidak cocok! Current: "
+                    + currentMinutes + " (" + formatMinutes(currentMinutes) + "), Scheduled: "
+                    + scheduledMinutes + " (" + formatMinutes(scheduledMinutes) + ")");
+            return false;
+        }
+
+        // 3. Simpan status bahwa adzan waktu ini sudah diputar hari ini
+        prefs.edit().putBoolean(todayKey, true).apply();
+
+        // 4. Tampilkan toast pemberitahuan
+        try {
+            Toast.makeText(context.getApplicationContext(), "🕌 Masuk Waktu " + prayerName, Toast.LENGTH_LONG).show();
+        } catch (Exception ignored) {}
+
+        // 5. Putar audio adzan
+        playAdzan(context, prayerName);
+        return true;
+    }
+
+    private static int getPrayerMinutes(PrayerInfo info, String prayerName) {
+        if (info == null || prayerName == null) return -1;
+        switch (prayerName.toLowerCase(Locale.ROOT)) {
+            case "subuh": return toMinutesFromStr(info.subuh);
+            case "dzuhur": return toMinutesFromStr(info.dzuhur);
+            case "ashar": return toMinutesFromStr(info.ashar);
+            case "maghrib": return toMinutesFromStr(info.maghrib);
+            case "isya": return toMinutesFromStr(info.isya);
+            default: return -1;
+        }
+    }
+
+    /**
+     * Memutar audio adzan Imam Makkah:
+     * - Subuh: Sheikh Ali Ahmed Mullah (dengan lafadz Ash-shalatu khairum minan naum)
+     * - Dzuhur/Ashar/Maghrib/Isya: Sheikh Esam Ali Khan (adzan standar tanpa kalimat subuh)
+     */
+    public static void playAdzan(Context context, String prayerName) {
+        if (context == null) return;
+        try {
+            if (mediaPlayer != null) {
+                try {
+                    if (mediaPlayer.isPlaying()) mediaPlayer.stop();
+                    mediaPlayer.release();
+                } catch (Exception ignored) {}
+                mediaPlayer = null;
             }
+
+            // Pilih resource audio sesuai waktu shalat
+            String resName = "adzan";
+            if (prayerName != null && prayerName.equalsIgnoreCase("Subuh")) {
+                int subuhRes = context.getResources().getIdentifier("adzan_subuh", "raw", context.getPackageName());
+                if (subuhRes != 0) {
+                    resName = "adzan_subuh";
+                }
+            }
+
+            int resId = context.getResources().getIdentifier(resName, "raw", context.getPackageName());
+            if (resId == 0) {
+                resId = context.getResources().getIdentifier("adzan", "raw", context.getPackageName());
+            }
+
+            if (resId != 0) {
+                // Jaga CPU tetap aktif selama adzan berbunyi
+                acquireWakeLock(context, 5 * 60 * 1000); // Max 5 menit
+
+                mediaPlayer = MediaPlayer.create(context.getApplicationContext(), resId);
+                if (mediaPlayer != null) {
+                    mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+                    mediaPlayer.setOnCompletionListener(mp -> {
+                        try {
+                            mp.release();
+                        } catch (Exception ignored) {}
+                        mediaPlayer = null;
+                        releaseWakeLock();
+                        Log.d(TAG, "Audio adzan selesai diputar.");
+                    });
+                    mediaPlayer.start();
+                    Log.d(TAG, "Audio adzan " + prayerName + " (" + resName + ") berhasil diputar!");
+                }
+            } else {
+                Log.w(TAG, "Resource audio adzan tidak ditemukan!");
+                releaseWakeLock();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Gagal memutar audio adzan", e);
+            releaseWakeLock();
+        }
+    }
+
+    public static void playAdzan(Context context) {
+        playAdzan(context, "Dzuhur");
+    }
+
+    private static synchronized void acquireWakeLock(Context context, long timeoutMs) {
+        try {
+            if (wakeLock == null) {
+                PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "tvhome:adzan_player");
+                }
+            }
+            if (wakeLock != null && !wakeLock.isHeld()) {
+                wakeLock.acquire(timeoutMs);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Gagal acquire WakeLock", e);
+        }
+    }
+
+    private static synchronized void releaseWakeLock() {
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Gagal release WakeLock", e);
         }
     }
 
@@ -194,7 +336,7 @@ public class PrayerManager {
             if (am == null) return;
 
             Calendar cal = Calendar.getInstance();
-            PrayerInfo info = calculate(context, cal);
+            PrayerInfo info = calculate(null, cal);
             long now = System.currentTimeMillis();
 
             int[] minutes = {
@@ -244,32 +386,6 @@ public class PrayerManager {
         }
     }
 
-    public static void playAdzan(Context context) {
-        try {
-            if (mediaPlayer != null) {
-                try { mediaPlayer.stop(); mediaPlayer.release(); } catch (Exception ignored) {}
-                mediaPlayer = null;
-            }
-            int resId = context.getResources().getIdentifier("adzan", "raw", context.getPackageName());
-            if (resId != 0) {
-                mediaPlayer = MediaPlayer.create(context.getApplicationContext(), resId);
-                if (mediaPlayer != null) {
-                    mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
-                    mediaPlayer.setOnCompletionListener(mp -> {
-                        mp.release();
-                        mediaPlayer = null;
-                    });
-                    mediaPlayer.start();
-                    Log.d(TAG, "Audio adzan berhasil diputar!");
-                }
-            } else {
-                Log.w(TAG, "Resource raw/adzan tidak ditemukan!");
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Gagal memutar audio adzan", e);
-        }
-    }
-
     private static double getHourAngle(double alt, double lat, double dec) {
         double rad = Math.PI / 180.0;
         double cosH = (Math.sin(alt * rad) - Math.sin(lat * rad) * Math.sin(dec * rad)) /
@@ -293,6 +409,10 @@ public class PrayerManager {
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    private static String formatMinutes(int minutes) {
+        return String.format(Locale.getDefault(), "%02d:%02d", minutes / 60, minutes % 60);
     }
 
     private static String formatTime(double hours) {

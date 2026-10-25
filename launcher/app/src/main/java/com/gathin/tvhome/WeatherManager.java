@@ -13,14 +13,14 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Pengambil data cuaca real-time untuk satu lokasi tetap: Kelurahan Medokan Ayu,
- * Kecamatan Rungkut, Kota Surabaya, Jawa Timur 60295.
- * Menggunakan Open-Meteo API (gratis, presisi, tanpa API key) + cache 30 menit.
- * Koordinat yang sama dipakai untuk jadwal shalat agar keduanya selalu sinkron.
+ * Pengambil data cuaca real-time presisi tinggi untuk:
+ * Kelurahan Medokan Ayu, Kecamatan Rungkut, Kota Surabaya (Jawa Timur 60295).
+ * Menggunakan Open-Meteo API dengan timezone Asia/Jakarta dan auto-refresh.
  */
 public class WeatherManager {
     private static final String TAG = "WeatherManager";
@@ -29,15 +29,16 @@ public class WeatherManager {
     private static final String PREF_LAST_FETCH = "last_weather_fetch";
     private static final String PREF_LOCATION_VERSION = "location_version";
 
-    // Lokasi cuaca & jadwal shalat (titik tengah Kelurahan Medokan Ayu, Rungkut,
-    // Surabaya 60295). Ini satu-satunya tempat yang perlu diubah untuk pindah lokasi.
-    // Naikkan LOCATION_VERSION setiap kali LAT/LON/CITY berubah supaya cache kota lama dibuang.
-    private static final int LOCATION_VERSION = 2;
+    // Versi konfigurasi - ubah angka ini untuk mereset cache cuaca seketika
+    private static final int LOCATION_VERSION = 5;
+
+    // Titik presisi: Medokan Ayu, Rungkut, Surabaya 60295
     public static final double LAT = -7.3256;
     public static final double LON = 112.7988;
     public static final String CITY = "Medokan Ayu";
 
-    private static final long REFRESH_INTERVAL_MS = 30 * 60 * 1000L; // 30 menit
+    // Refresh cuaca setiap 10 menit
+    private static final long REFRESH_INTERVAL_MS = 10 * 60 * 1000L;
     private static final ExecutorService executor = Executors.newSingleThreadExecutor();
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -54,7 +55,7 @@ public class WeatherManager {
         long lastFetch = prefs.getLong(PREF_LAST_FETCH, 0);
         String cached = prefs.getString(PREF_WEATHER_TEXT, null);
 
-        // Lokasi berubah: buang cache teks lama (yang masih menyebut kota sebelumnya).
+        // Jika versi lokasi berubah, buang cache lama
         if (prefs.getInt(PREF_LOCATION_VERSION, 0) != LOCATION_VERSION) {
             cached = null;
             lastFetch = 0;
@@ -65,29 +66,26 @@ public class WeatherManager {
                     .apply();
         }
 
-        // Jika data baru diupdate kurang dari 30 menit, tampilkan cache dulu
-        if (cached != null) {
+        // Tampilkan cache terlebih dahulu jika ada agar UI tidak kosong
+        if (cached != null && callback != null) {
             callback.onWeatherUpdated(cached);
-            if (now - lastFetch < REFRESH_INTERVAL_MS) {
-                return;
-            }
+        }
+
+        // Cek apakah perlu mengambil data baru dari server (setiap 10 menit atau jika jam melompat)
+        boolean needFetch = (cached == null) || (lastFetch == 0) || (now - lastFetch >= REFRESH_INTERVAL_MS) || (now < lastFetch);
+        if (!needFetch) {
+            return;
         }
 
         executor.execute(() -> {
             try {
-                // 1. Lokasi tetap: Medokan Ayu, Rungkut, Surabaya. Tidak ada IP geolocation,
-                //    jadi cuaca tidak berpindah mengikuti IP koneksi.
-                double lat = LAT;
-                double lon = LON;
-                String city = CITY;
+                // Pastikan jadwal shalat sinkron dengan koordinat yang sama
+                PrayerManager.updateLocation(LAT, LON, CITY);
 
-                // Jadwal shalat memakai titik yang sama.
-                PrayerManager.updateLocation(lat, lon, city);
-
-                // 2. Ambil data cuaca dari Open-Meteo berdasarkan lat & lon
-                String weatherApiUrl = String.format(java.util.Locale.US,
-                        "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto",
-                        lat, lon);
+                // API Open-Meteo dengan timezone Asia/Jakarta
+                String weatherApiUrl = String.format(Locale.US,
+                        "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&current=temperature_2m,apparent_temperature,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%%2FJakarta",
+                        LAT, LON);
 
                 URL url = new URL(weatherApiUrl);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -114,17 +112,24 @@ public class WeatherManager {
                     double minTemp = minArr.getDouble(0);
 
                     String condition = getWeatherCondition(code);
-                    String result = String.format("○ %d° %s • %s  H:%d° L:%d°",
-                            (int) Math.round(temp), condition, city,
-                            (int) Math.round(maxTemp), (int) Math.round(minTemp));
+                    int currentTempInt = (int) Math.round(temp);
+                    int highTempInt = (int) Math.round(maxTemp);
+                    int lowTempInt = (int) Math.round(minTemp);
+
+                    // Format: ○ 31° Cerah Berawan • Medokan Ayu  H:32° L:26°
+                    String result = String.format(Locale.getDefault(),
+                            "○ %d° %s • %s  H:%d° L:%d°",
+                            currentTempInt, condition, CITY, highTempInt, lowTempInt);
 
                     prefs.edit()
                             .putString(PREF_WEATHER_TEXT, result)
                             .putLong(PREF_LAST_FETCH, System.currentTimeMillis())
                             .apply();
 
-                    Log.d(TAG, "Cuaca berhasil diperbarui: " + result);
-                    mainHandler.post(() -> callback.onWeatherUpdated(result));
+                    Log.d(TAG, "Cuaca real-time Medokan Ayu berhasil diperbarui: " + result);
+                    if (callback != null) {
+                        mainHandler.post(() -> callback.onWeatherUpdated(result));
+                    }
                 } else {
                     Log.w(TAG, "Response code Open-Meteo: " + conn.getResponseCode());
                 }
@@ -134,16 +139,39 @@ public class WeatherManager {
         });
     }
 
+    /**
+     * Penerjemahan kode WMO Open-Meteo yang presisi untuk wilayah tropis Indonesia
+     */
     private static String getWeatherCondition(int code) {
-        if (code == 0) return "Cerah";
-        if (code == 1) return "Sebagian Cerah";
-        if (code == 2) return "Sebagian Berawan";
-        if (code == 3) return "Mendung";
-        if (code == 45 || code == 48) return "Berkabut";
-        if (code >= 51 && code <= 55) return "Gerimis";
-        if (code >= 61 && code <= 65) return "Hujan";
-        if (code >= 80 && code <= 82) return "Hujan Deras";
-        if (code >= 95) return "Badai Petir";
-        return "Cerah";
+        switch (code) {
+            case 0:
+            case 1:
+                return "Cerah";
+            case 2:
+                return "Cerah Berawan";
+            case 3:
+                return "Berawan";
+            case 45:
+            case 48:
+                return "Berkabut";
+            case 51:
+            case 53:
+            case 55:
+                return "Gerimis";
+            case 61:
+            case 63:
+            case 65:
+                return "Hujan";
+            case 80:
+            case 81:
+            case 82:
+                return "Hujan Deras";
+            case 95:
+            case 96:
+            case 99:
+                return "Hujan Petir";
+            default:
+                return "Cerah Berawan";
+        }
     }
 }

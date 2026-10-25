@@ -3,13 +3,11 @@ package com.gathin.tvhome;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.os.PowerManager;
 import android.util.Log;
-import android.widget.Toast;
 
 /**
- * Menerima alarm waktu shalat tepat pada detiknya, memutar suara adzan,
- * dan menjadwalkan ulang alarm shalat berikutnya.
+ * Menerima alarm waktu shalat, memvalidasi ketepatan jam masuk shalat,
+ * memutar adzan yang sesuai (Subuh vs Reguler), dan menjadwalkan alarm berikutnya.
  */
 public class AdzanReceiver extends BroadcastReceiver {
     private static final String TAG = "AdzanReceiver";
@@ -24,34 +22,20 @@ public class AdzanReceiver extends BroadcastReceiver {
             String prayerName = intent.getStringExtra("prayer_name");
             if (prayerName == null) prayerName = "Shalat";
 
-            // Pastikan CPU tetap terjaga beberapa detik agar audio mulai diputar
-            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-            PowerManager.WakeLock wakeLock = null;
-            if (pm != null) {
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "tvhome:adzan_wakelock");
-                wakeLock.acquire(15000); // 15 detik
-            }
+            Log.d(TAG, "Menerima broadcast alarm adzan untuk: " + prayerName);
 
-            try {
-                // Tampilkan pemberitahuan singkat di layar TV
-                Toast.makeText(context, "🕌 Masuk Waktu " + prayerName, Toast.LENGTH_LONG).show();
+            // Validasi apakah jam saat ini benar-benar pas dengan waktu shalat tersebut
+            // dan belum pernah diputar hari ini.
+            boolean played = PrayerManager.playAdzanIfValid(context, prayerName);
+            Log.d(TAG, "Hasil validasi adzan " + prayerName + ": " + (played ? "DIPUTAR" : "DIABAIKAN / TIDAK VALID"));
 
-                // Putar suara adzan
-                PrayerManager.playAdzan(context);
-            } catch (Exception e) {
-                Log.e(TAG, "Error saat memainkan adzan", e);
-            } finally {
-                if (wakeLock != null && wakeLock.isHeld()) {
-                    wakeLock.release();
-                }
-            }
-
-            // Jadwalkan waktu sholat berikutnya
+            // Jadwalkan ulang siklus alarm shalat berikutnya
             PrayerManager.scheduleAlarms(context);
         } else if (Intent.ACTION_BOOT_COMPLETED.equals(action)
                 || Intent.ACTION_TIME_CHANGED.equals(action)
                 || Intent.ACTION_TIMEZONE_CHANGED.equals(action)) {
-            // Jadwalkan ulang saat TV menyala atau waktu berubah
+            // Sinkronisasi dan jadwalkan ulang saat TV booting atau waktu berubah
+            Log.d(TAG, "Waktu sistem berubah atau boot selesai, menjadwalkan ulang alarm shalat.");
             PrayerManager.scheduleAlarms(context);
         }
     }
